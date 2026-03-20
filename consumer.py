@@ -1,33 +1,65 @@
 import pika
 import json
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker
 
+# --- DATABASE SETUP ---
+# 1. We define the 'Engine' (the connection to the file)
+engine = create_engine('sqlite:///logs.db')
+
+# 2. We define the 'Base' (the blueprint for our tables)
+Base = declarative_base()
+
+# 3. We define the 'Table' (the structure of our logs)
+class LogEntry(Base):
+    __tablename__ = 'logs'
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(String)
+    level = Column(String)
+    service = Column(String)
+    message = Column(String)
+    received_at = Column(DateTime, default=datetime.utcnow)
+
+# 4. Here is the FIX: We call create_all on the metadata, not as an import
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
+
+def save_to_db(data):
+    """Helper function to save the log dictionary to SQLite"""
+    session = Session()
+    try:
+        new_log = LogEntry(
+            timestamp=data.get("timestamp"),
+            level=data.get("level"),
+            service=data.get("service"),
+            message=data.get("message")
+        )
+        session.add(new_log)
+        session.commit()
+    except Exception as e:
+        print(f" Error saving to DB: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+# --- RABBITMQ CALLBACK ---
 def process_log(ch, method, properties, body):
-    """
-    Callback function that runs when a message is received from RabbitMQ
-    """
-    # 1. Decode the binary message into a string, then a dictionary
+    # Decode the binary message from RabbitMQ
     log_data = json.loads(body.decode())
+    
+    # Save it to our database
+    save_to_db(log_data)
+    
+    print(f" [db] Saved log from {log_data.get('service')}")
 
-    # 2. Extract the data
-    timestamp = log_data.get("timestamp")
-    level = log_data.get("level")
-    service = log_data.get("service")
-    message = log_data.get("message")
-
-    # 3. Create a structured log entry (for demonstration, it is printed)
-    print(f"[{timestamp}] {level} from {service}: {message}")
-
-# --- Connection Setup ---
-connection = pika.BlockingConnection(pika.ConnectionParameters('127.0.0.1'))
+# --- CONNECTION SETUP ---
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
 channel = connection.channel()
-
-# Ensure the queue exists
 channel.queue_declare(queue='log_queue')
 
-# Tell RabbitMQ which function to call when a message is received
-channel.basic_consume(queue='log_queue',
-                        on_message_callback=process_log, 
-                        auto_ack=True)
+# Tell RabbitMQ to use our 'process_log' function
+channel.basic_consume(queue='log_queue', on_message_callback=process_log, auto_ack=True)
 
-print(" [*] Waiting for logs. To exit press CTRL+C")
+print(" [*] Consumer started. Saving logs to logs.db. Press CTRL+C to exit.")
 channel.start_consuming()
