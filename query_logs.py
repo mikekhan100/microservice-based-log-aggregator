@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-# Import the class you already defined in consumer.py
+# Import the class defined in consumer.py
 from consumer import LogEntry
 
 # 1. Connect to the SQLite database
@@ -14,7 +14,7 @@ print("\n--- DATABASE QUERY REPORT ---")
 total_logs = session.query(LogEntry).count()
 print(f"Total logs archived: {total_logs}")
 
-# 3. Filtered Query: Let's find all the 'ERROR' logs
+# 3. Filtered Query: find all the 'ERROR' logs
 errors = session.query(LogEntry).filter(LogEntry.level == "ERROR").all()
 
 print(f"Total Errors found: {len(errors)}")
